@@ -51,6 +51,24 @@ class BufferedPipe(object):
         self.payload = b''
 
 
+def process_file(wav_file):
+    if loaded_model is not None:
+        x, sample_rate = librosa.load(wav_file, res_type='kaiser_fast')
+        mfccs = np.mean(librosa.feature.mfcc(y=x, sr=sample_rate, n_mfcc=40).T, axis=0)
+        x = [mfccs]
+        prediction = loaded_model.predict(x)
+        logging.info(f"Prediction: {prediction}")
+
+        beep_captured = prediction[0] == 0
+        if beep_captured:
+            logging.info("Beep detected")
+
+        for client in clients:
+            client.write_message({"beep_detected": beep_captured})
+    else:
+        logging.error("Model not loaded")
+
+
 class AudioProcessor(object):
     def __init__(self, rate, clip_min):
         self.rate = rate
@@ -63,30 +81,22 @@ class AudioProcessor(object):
                 output.setparams((1, 2, self.rate, 0, 'NONE', 'not compressed'))
                 output.writeframes(payload)
             logging.debug(f'File written {fn}')
-            self.process_file(fn)
+            process_file(fn)
             os.remove(fn)
         else:
             logging.info(f'Discarding {count} frames')
 
-    def process_file(self, wav_file):
-        if loaded_model is not None:
-            X, sample_rate = librosa.load(wav_file, res_type='kaiser_fast')
-            mfccs = np.mean(librosa.feature.mfcc(y=X, sr=sample_rate, n_mfcc=40).T, axis=0)
-            X = [mfccs]
-            prediction = loaded_model.predict(X)
-            logging.info(f"Prediction: {prediction}")
-
-            beep_captured = prediction[0] == 0
-            if beep_captured:
-                logging.info("Beep detected")
-
-            for client in clients:
-                client.write_message({"beep_detected": beep_captured})
-        else:
-            logging.error("Model not loaded")
-
 
 class WSHandler(tornado.websocket.WebSocketHandler):
+    def __init__(self, application, request):
+        super().__init__(application, request)
+        self.processor = None
+        self.silence = None
+        self.rate = None
+        self.id = None
+        self.vad = None
+        self.frame_buffer = None
+
     def initialize(self):
         self.frame_buffer = None
         self.vad = webrtcvad.Vad()
