@@ -2,6 +2,7 @@
 
 import logging
 import os
+import sys
 import uuid
 import wave
 import json
@@ -18,6 +19,26 @@ from base64 import b64decode
 from dotenv import load_dotenv
 
 load_dotenv()
+
+log_level_mapping = {
+    'DEBUG': logging.DEBUG,
+    'INFO': logging.INFO,
+    'WARNING': logging.WARNING,
+    'ERROR': logging.ERROR,
+    'CRITICAL': logging.CRITICAL
+}
+
+log_level = os.getenv('LOG_LEVEL', 'INFO')
+log_level = log_level_mapping.get(log_level.upper(), logging.INFO)
+
+logger = logging.getLogger('freeswitch_audio_stream_poc')
+logging.basicConfig(level=log_level)
+
+log_console_handler = logging.StreamHandler(sys.stdout)
+log_console_handler.setLevel(log_level)
+log_console_handler.setFormatter(logging.Formatter(
+    '%(asctime)s - %(levelname)s - %(message)s'))
+logger.addHandler(log_console_handler)
 
 logging.captureWarnings(True)
 
@@ -57,16 +78,16 @@ def process_file(wav_file):
         mfccs = np.mean(librosa.feature.mfcc(y=x, sr=sample_rate, n_mfcc=40).T, axis=0)
         x = [mfccs]
         prediction = loaded_model.predict(x)
-        logging.info(f"Prediction: {prediction}")
+        logger.info(f"Prediction: {prediction}")
 
         beep_captured = prediction[0] == 0
         if beep_captured:
-            logging.info("Beep detected")
+            logger.info("Beep detected")
 
         for client in clients:
             client.write_message({"beep_detected": beep_captured})
     else:
-        logging.error("Model not loaded")
+        logger.error("Model not loaded")
 
 
 class AudioProcessor(object):
@@ -80,11 +101,11 @@ class AudioProcessor(object):
             with wave.open(fn, 'wb') as output:
                 output.setparams((1, 2, self.rate, 0, 'NONE', 'not compressed'))
                 output.writeframes(payload)
-            logging.debug(f'File written {fn}')
+            logger.debug(f'File written {fn}')
             process_file(fn)
             os.remove(fn)
         else:
-            logging.info(f'Discarding {count} frames')
+            logger.info(f'Discarding {count} frames')
 
 
 class WSHandler(tornado.websocket.WebSocketHandler):
@@ -105,16 +126,16 @@ class WSHandler(tornado.websocket.WebSocketHandler):
         self.silence = 20
 
     def open(self):
-        logging.info("Client connected")
+        logger.info("Client connected")
         clients.append(self)
 
     def on_message(self, message):
         if isinstance(message, bytes):
             if self.vad.is_speech(message, self.rate):
-                logging.debug("SPEECH detected")
+                logger.debug("SPEECH detected")
                 self.frame_buffer.append(message)
             else:
-                logging.debug("Silence detected")
+                logger.debug("Silence detected")
                 self.silence -= 1
                 if self.silence == 0:
                     self.frame_buffer.process()
@@ -133,7 +154,7 @@ class WSHandler(tornado.websocket.WebSocketHandler):
             self.write_message('ok')
 
     def on_close(self):
-        logging.info("Client disconnected")
+        logger.info("Client disconnected")
         clients.remove(self)
 
 
@@ -146,7 +167,6 @@ class PingHandler(tornado.web.RequestHandler):
 
 def main():
     try:
-        logging.basicConfig(level=logging.INFO, format="%(levelname)7s %(message)s")
         application = tornado.web.Application([
             (r"/ping", PingHandler),
             (r"/(.*)", WSHandler),
