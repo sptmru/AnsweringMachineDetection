@@ -117,6 +117,8 @@ class WSHandler(tornado.websocket.WebSocketHandler):
         self.id = None
         self.vad = None
         self.frame_buffer = None
+        self.path = None
+        self.tick = None
 
     def initialize(self):
         self.frame_buffer = None
@@ -125,9 +127,11 @@ class WSHandler(tornado.websocket.WebSocketHandler):
         self.rate = None
         self.silence = 20
 
-    def open(self):
+    def open(self, path):
         logger.info("Client connected")
         clients.append(self)
+        self.path = self.request.uri
+        self.tick = 0
 
     def on_message(self, message):
         if isinstance(message, bytes):
