@@ -31,6 +31,7 @@ print(loaded_model)
 # Global variables
 clients = []
 
+
 class BufferedPipe(object):
     def __init__(self, max_frames, sink):
         self.sink = sink
